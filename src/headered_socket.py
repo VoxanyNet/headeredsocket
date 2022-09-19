@@ -1,16 +1,18 @@
 import socket
-import sys
 
 class InvalidHeader(Exception):
     pass
 
 class Disconnected(Exception):
     pass
-    
+
+class PayloadTooLarge(Exception):
+    pass
+
 # a socket that has the ability to add headers
 class HeaderedSocket(socket.socket):
 
-    def send_headered(self, data, header_size):
+    def send_headered(self, data, header_size = 7):
         # construct a payload with header from bytes
 
         # get number of bytes json string uses
@@ -18,7 +20,7 @@ class HeaderedSocket(socket.socket):
 
         # the amount of data that has been acknowledged by the client to have been sent
         # somtimes we need to resend data if the client does not acknowledge it
-        # im not sure why sockets dont do this automatically
+        # im not sure why sockets don't do this automatically
         # in my case the clients receive buffer was filling up
         sent_data = 0
 
@@ -38,27 +40,21 @@ class HeaderedSocket(socket.socket):
         # final payload with header and data
         headered_data = header_bytes + data
 
+        # keep sending until
         while sent_data != len(headered_data):
             sent_data += self.send(
                 headered_data[sent_data :] # send headered data starting at what we've sent so far
             )
 
-            print(f"SEND: {sent_data}")
 
-            if sent_data < len(headered_data):
-                print("sending again!!!")
-
-        #print(f"Sent headered payload: {payload}")
-
-    def recv_headered(self, header_size):
+    def recv_headered(self, header_size = 7):
 
         # read the header
         header = self.recv(header_size).decode("utf-8")
-        #print(f"RECV {header}")
 
         if header == "":
+
             # the socket will return a blank string when the client has sent FIN packet
-            
             raise Disconnected("Remote socket disconnected")
 
             return
@@ -69,10 +65,7 @@ class HeaderedSocket(socket.socket):
 
         # if we cannot convert to int
         except ValueError:
-            #print(f"Sender sent header {header}, which is invalid")
             raise InvalidHeader(f"Sender sent header {header}, which is invalid")
-
-        #print(f"Received payload with size {payload_length}")
 
         # represents the final constructed data sent
         constructed_data = bytearray()
@@ -80,18 +73,10 @@ class HeaderedSocket(socket.socket):
         # until we have received the full payload, we do not stop reading the buffer
         while len(constructed_data) != payload_length:
 
-            if payload_length - len(constructed_data) == 0:
-                print("WOAH WOAH SOMETHING FUNKY")
-                sys.exit()
-
             # read what is currently in the buffer and add it to the constructed_data byte array
             new_data = self.recv(payload_length - len(constructed_data))
 
             constructed_data.extend(new_data)
-
-            if payload_length - len(constructed_data) != 0:
-                print("we have to read again!")
-
 
         return constructed_data
 
@@ -99,12 +84,12 @@ class HeaderedSocket(socket.socket):
     def accept(self):
 
         fd, addr = self._accept()
-        sock = HeaderedSocket(self.family, self.type, self.proto, fileno=fd) # this is the only changed line
 
-        # i need to remove this for now because its weird
-        # if getdefaulttimeout() is None and self.gettimeout():
-        #     sock.setblocking(True)
+        # create a headered socket instead of a normal socket
+        sock = HeaderedSocket(self.family, self.type, self.proto, fileno=fd)
 
-        sock.settimeout(0)
+        # blocking sockets return blocking and non blocking return non blocking
+        if self.timeout == 0 or None:
+            sock.settimeout(0)
 
         return sock, addr
